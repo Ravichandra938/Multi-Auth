@@ -49,15 +49,18 @@ pipeline {
     touch .env
     cp .env.example .env || true
     
-    # 2. Generate the real RSA keys
+    # 2. Force delete old keys so the script does not panic
+    rm -rf keys/ || true
+    
+    # 3. Generate the real RSA keys
     npm run setup-keys
     
-    # 3. Merge the generated keys directly into the .env file
+    # 4. Merge the generated keys directly into the .env file
     cat keys/private_env.txt >> .env || true
     cat keys/public_env.txt >> .env || true
     echo "PORT=5000" >> .env
     
-    # 4. Restart the server with the real keys
+    # 5. Restart the server with the real keys
     pm2 delete mern-backend || true
     pm2 start server.js --name "mern-backend" --update-env
 '''
