@@ -45,6 +45,7 @@ pipeline {
                 script {
                     // Ensure the .env file is loaded and the backend is rebooted via PM2[cite: 2]
                     sh '''
+                    npm run setup-keys
                     pm2 describe mern-backend > /dev/null && pm2 restart mern-backend || pm2 start server.js --name "mern-backend"
                     '''
                 }
