@@ -63,8 +63,7 @@ pipeline {
             steps {
                 sh '''
                     # 1. Ensure directories exist with Jenkins permissions
-                    sudo mkdir -p ${PROD_DIR} ${BACKUP_DIR}
-                    sudo chown -R jenkins:jenkins /var/www
+                    mkdir -p /var/www/app2-mern /var/www/app2-mern-backup
                     
                     # 2. Backup the current live version for safe rollbacks
                     if [ "$(ls -A ${PROD_DIR})" ]; then
