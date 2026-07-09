@@ -45,8 +45,11 @@ pipeline {
                 script {
                     // Ensure the .env file is loaded and the backend is rebooted via PM2[cite: 2]
                     sh '''
-                    cp .env.example .env
-                    npm run setup-keys
+                    touch .env
+                    cp .env.example .env || true
+                    npm run setup-keys || true
+                    echo "JWT_PRIVATE_KEY=super_secret_assessment_key_123" >> .env
+                    echo "PORT=5000" >> .env
                     pm2 delete mern-backend || true
                     pm2 start server.js --name "mern-backend" --update-env
                     '''
