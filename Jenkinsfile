@@ -13,6 +13,20 @@ pipeline {
                 sh 'npm install'
             }
         }
+        stage('Pre-flight Disk Check') {
+    steps {
+        sh '''
+            # Fail if disk usage is above 90%
+            USAGE=$(df / | grep / | awk '{ print $5 }' | sed 's/%//g')
+            if [ "$USAGE" -gt 90 ]; then
+                echo "CRITICAL: Disk usage is $USAGE%. Aborting to prevent crash."
+                exit 1
+            fi
+            # Clear old NPM cache before starting
+            npm cache clean --force
+        '''
+    }
+}
 
         stage('Prisma Migration Safety') {
             steps {
