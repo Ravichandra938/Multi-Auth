@@ -44,7 +44,7 @@ pipeline {
             steps {
                 script {
                     // Ensure the .env file is loaded and the backend is rebooted via PM2[cite: 2]
-                    sh '''
+                   sh '''
     # 1. Prepare the environment file
     touch .env
     cp .env.example .env || true
@@ -60,7 +60,10 @@ pipeline {
     cat keys/public_env.txt >> .env || true
     echo "PORT=5000" >> .env
     
-    # 5. Restart the server with the real keys
+    # 5. Inject the secret Database URL provided by Jenkins
+    echo "DATABASE_URL=$DATABASE_URL" >> .env
+    
+    # 6. Restart the server with the real keys
     pm2 delete mern-backend || true
     pm2 start server.js --name "mern-backend" --update-env
 '''
