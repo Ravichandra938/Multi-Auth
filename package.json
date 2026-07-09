@@ -5,6 +5,7 @@
   "main": "index.js",
   "scripts": {
     "start": "node server.js",
+    "build": "echo 'No build required for Express backend'",
     "dev": "nodemon server.js",
     "migrate": "prisma migrate deploy",
     "prisma:generate": "prisma generate",
