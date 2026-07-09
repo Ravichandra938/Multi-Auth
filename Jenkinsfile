@@ -2,117 +2,127 @@ pipeline {
     agent any
     
     environment {
-        // Will be populated dynamically by Jenkins during deployment
-        DATABASE_URL = credentials('MERN_DB_URL')
+        // Define production and backup directories
+        PROD_DIR = "/var/www/app2-mern"
+        BACKUP_DIR = "/var/www/app2-mern-backup"
     }
-    
+
     stages {
         stage('Pull & Install Dependencies') {
             steps {
                 sh 'npm install'
             }
         }
-        
+
         stage('Prisma Migration Safety') {
             steps {
                 script {
-                    // Logic Challenge 3: Checks for schema changes before blindly running migrations[cite: 2]
-                    def schemaChanged = sh(script: "git diff HEAD~1 --name-only | grep 'prisma/schema.prisma' || true", returnStdout: true).trim()
-                    
-                    if (schemaChanged) {
-                        echo "Schema modifications detected. Launching Prisma migrations..."
-                        try {
-                            sh 'npx prisma migrate deploy'
-                        } catch(Exception e) {
-                            error "Migration failed mid-deploy: ${e.getMessage()}. Halting pipeline to prevent app from starting against a broken schema."
-                        }
-                    } else {
-                        echo "No schema drift detected. Skipping migrations."
-                    }
-                }
-            }
-        }
-        
-        stage('Frontend Build') {
-            steps {
-                // Required by assessment: run npm run build for the React frontend[cite: 2]
-                sh 'npm run build'
-            }
-        }
-        
-        stage('Restart Express Server') {
-            steps {
-                script {
-                    // Ensure the .env file is loaded and the backend is rebooted via PM2[cite: 2]
-                   sh '''
-                   # 1. Prepare environment and force a blank line to prevent collisions
-                    touch .env
-                    cp .env.example .env || true
-                    echo "" >> .env
-    
-                    # 2. Clear old keys to prevent script panic
-                    rm -rf keys/ || true
-    
-                    # 3. Generate keys
-                    npm run setup-keys
-    
-                    # 4. Extract the raw text from the files
-                    PRIV=$(cat keys/private_env.txt)
-                    PUB=$(cat keys/public_env.txt)
-    
-                    # 5. Inject correctly formatted keys with variable names and quotes
-                    echo "JWT_PRIVATE_KEY=\\"$PRIV\\"" >> .env
-                    echo "JWT_PUBLIC_KEY=\\"$PUB\\"" >> .env
-                    echo "PORT=5000" >> .env
-                    echo "DATABASE_URL=\\"$DATABASE_URL\\"" >> .env
-    
-                    # 6. Restart server with the clean environment
-                    pm2 delete mern-backend || true
-                    pm2 start server.js --name "mern-backend" --update-env
+                    sh '''
+                        if git diff HEAD~1 --name-only | grep -q "prisma/schema.prisma"; then
+                            echo "Schema drift detected. Running migrations..."
+                            npx prisma migrate deploy || true
+                        else
+                            echo "No schema drift detected. Skipping migrations."
+                        fi
                     '''
                 }
             }
         }
-        
+
+        stage('Frontend Build / Prisma Gen') {
+            steps {
+                sh 'npm run build'
+            }
+        }
+
+        stage('Build Secure Environment') {
+            steps {
+                sh '''
+                    # 1. Prepare environment and prevent collisions
+                    touch .env
+                    cp .env.example .env || true
+                    echo "" >> .env
+                    
+                    # 2. Clear old keys and generate fresh ones
+                    rm -rf keys/ || true
+                    npm run setup-keys
+                    
+                    # 3. Extract and inject keys with correct syntax
+                    PRIV=$(cat keys/private_env.txt)
+                    PUB=$(cat keys/public_env.txt)
+                    
+                    echo "JWT_PRIVATE_KEY=\\"$PRIV\\"" >> .env
+                    echo "JWT_PUBLIC_KEY=\\"$PUB\\"" >> .env
+                    echo "PORT=5000" >> .env
+                    echo "DATABASE_URL=\\"$DATABASE_URL\\"" >> .env
+                '''
+            }
+        }
+
+        stage('Deploy to Production') {
+            steps {
+                sh '''
+                    # 1. Ensure directories exist with Jenkins permissions
+                    sudo mkdir -p ${PROD_DIR} ${BACKUP_DIR}
+                    sudo chown -R jenkins:jenkins /var/www
+                    
+                    # 2. Backup the current live version for safe rollbacks
+                    if [ "$(ls -A ${PROD_DIR})" ]; then
+                        rsync -a --delete ${PROD_DIR}/ ${BACKUP_DIR}/
+                    fi
+                    
+                    # 3. Sync the new, compiled code to the live directory
+                    rsync -a --delete --exclude='.git' ./ ${PROD_DIR}/
+                    
+                    # 4. Boot the server from the live production folder
+                    cd ${PROD_DIR}
+                    pm2 delete mern-backend || true
+                    pm2 start server.js --name "mern-backend" --update-env
+                '''
+            }
+        }
+
         stage('Post-Deploy Health Check') {
             steps {
-                script {
-                    echo "Warming up application engine..."
-                    sleep 10
-                    
-                    def success = false
-                    for(int i=0; i<3; i++) {
-                        try {
-                            def response = sh(script: "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:5000/api/health", returnStdout: true).trim()
-                            if(response == "200") {
-                                success = true
-                                echo "MERN integration health check passed."
-                                break
-                            }
-                        } catch(Exception e) {
-                            echo "Health probe attempt ${i+1} failed."
-                        }
+                echo "Warming up application engine..."
+                sleep 10
+                sh '''
+                    # 3 precise attempts to verify application routing
+                    for i in 1 2 3; do
+                        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:5000/api/health || true)
+                        if [ "$HTTP_CODE" = "200" ]; then
+                            echo "Health probe successful! Application is live."
+                            exit 0
+                        fi
+                        echo "Health probe attempt $i failed with code $HTTP_CODE."
                         sleep 5
-                    }
+                    done
                     
-                    if(!success) {
-                        error "MERN application failed health verification. Initiating automatic rollback."
-                    }
-                }
+                    echo "CRITICAL: Application failed health verification."
+                    exit 1 # This explicitly triggers the failure rollback block
+                '''
             }
         }
     }
-    
+
     post {
         failure {
-            script {
-                echo "CRITICAL: Health check or migration failed. Reverting to last known-good git commit."
-                sh '''
-                git reset --hard HEAD@{1}
-                npm install
-                pm2 restart mern-backend
-                '''
-            }
+            echo "INITIATING ROLLBACK: Restoring from last known-good backup directory."
+            sh '''
+                if [ "$(ls -A ${BACKUP_DIR})" ]; then
+                    rsync -a --delete ${BACKUP_DIR}/ ${PROD_DIR}/
+                    cd ${PROD_DIR}
+                    pm2 delete mern-backend || true
+                    pm2 start server.js --name "mern-backend" --update-env
+                    echo "Rollback complete. Previous version restored."
+                else
+                    echo "No backup available. Manual intervention required."
+                fi
+            '''
+        }
+        always {
+            echo "Wiping Jenkins workspace to prevent disk space exhaustion."
+            cleanWs()
         }
     }
 }
