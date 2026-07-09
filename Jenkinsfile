@@ -124,4 +124,9 @@ pipeline {
             cleanWs()
         }
     }
+    post {
+    always {
+        cleanWs() // Automatically deletes workspace files after the build finishes
+    }
+}
 }
