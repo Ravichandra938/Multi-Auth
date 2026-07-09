@@ -45,9 +45,10 @@ pipeline {
                 script {
                     // Ensure the .env file is loaded and the backend is rebooted via PM2[cite: 2]
                     sh '''
+                    cp .env.example .env
                     npm run setup-keys
                     pm2 delete mern-backend || true
-                    pm2 start server.js --name "mern-backend"
+                    pm2 start server.js --name "mern-backend" --update-env
                     '''
                 }
             }
