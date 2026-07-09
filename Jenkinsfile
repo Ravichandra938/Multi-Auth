@@ -45,7 +45,7 @@ pipeline {
                 script {
                     // Ensure the .env file is loaded and the backend is rebooted via PM2[cite: 2]
                     sh '''
-                    pm2 describe mern-backend > /dev/null && pm2 restart mern-backend || pm2 start index.js --name "mern-backend"
+                    pm2 describe mern-backend > /dev/null && pm2 restart mern-backend || pm2 start server.js --name "mern-backend"
                     '''
                 }
             }
