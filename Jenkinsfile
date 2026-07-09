@@ -45,28 +45,31 @@ pipeline {
                 script {
                     // Ensure the .env file is loaded and the backend is rebooted via PM2[cite: 2]
                    sh '''
-    # 1. Prepare the environment file
-    touch .env
-    cp .env.example .env || true
+                   # 1. Prepare environment and force a blank line to prevent collisions
+                    touch .env
+                    cp .env.example .env || true
+                    echo "" >> .env
     
-    # 2. Force delete old keys so the script does not panic
-    rm -rf keys/ || true
+                    # 2. Clear old keys to prevent script panic
+                    rm -rf keys/ || true
     
-    # 3. Generate the real RSA keys
-    npm run setup-keys
+                    # 3. Generate keys
+                    npm run setup-keys
     
-    # 4. Merge the generated keys directly into the .env file
-    cat keys/private_env.txt >> .env || true
-    cat keys/public_env.txt >> .env || true
-    echo "PORT=5000" >> .env
+                    # 4. Extract the raw text from the files
+                    PRIV=$(cat keys/private_env.txt)
+                    PUB=$(cat keys/public_env.txt)
     
-    # 5. Inject the secret Database URL provided by Jenkins
-    echo "DATABASE_URL=$DATABASE_URL" >> .env
+                    # 5. Inject correctly formatted keys with variable names and quotes
+                    echo "JWT_PRIVATE_KEY=\\"$PRIV\\"" >> .env
+                    echo "JWT_PUBLIC_KEY=\\"$PUB\\"" >> .env
+                    echo "PORT=5000" >> .env
+                    echo "DATABASE_URL=\\"$DATABASE_URL\\"" >> .env
     
-    # 6. Restart the server with the real keys
-    pm2 delete mern-backend || true
-    pm2 start server.js --name "mern-backend" --update-env
-'''
+                    # 6. Restart server with the clean environment
+                    pm2 delete mern-backend || true
+                    pm2 start server.js --name "mern-backend" --update-env
+                    '''
                 }
             }
         }
